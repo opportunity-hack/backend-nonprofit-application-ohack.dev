@@ -1,105 +1,155 @@
-// Import required libraries
-const express = require("express");
-const admin = require("firebase-admin");
-const cors = require("cors");
-const bodyParser = require("body-parser");
-const serviceAccount = require("./firebase-service-account.json");
+const express = require('express');
 const app = express();
+const { auth, requiredScopes } = require('express-oauth2-jwt-bearer');
+const cors = require('cors');
+const admin = require("firebase-admin");
 
-app.use(cors());
-app.use(bodyParser.json());
+// Setup logger to log info and warning messages
+const log4js = require('log4js');
+const logger = log4js.getLogger();
+logger.level = 'info';
 
-// Load environment variables
-require("dotenv").config();
+
+
+require('dotenv').config();
+
+
+if (!process.env.ISSUER_BASE_URL || !process.env.AUDIENCE || !process.env.FIREBASE_CERT_CONFIG) {
+    throw 'Make sure you have ISSUER_BASE_URL, FIREBASE_CERT_CONFIG, and AUDIENCE in your .env file';
+}
 
 const corsOptions = {
-  origin: process.env.CORSROUTE,
+    origin: 'http://localhost:3000'
 };
 
-// Initialize Firebase Admin SDK with service account credentials
+app.use(cors(corsOptions));
+app.use(express.json());
+
+const checkJwt = auth();
+
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+    credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_CERT_CONFIG)),
 });
 
 // Create a reference to a Cloud Firestore collection
 const db = admin.firestore();
 const collectionRef = db.collection("project_applications");
 
-// Create an API endpoint that retrieves data from the Cloud Firestore collection
-app.get("/get-application/:id", (req, res) => {
-  // Replace the variable id with req.params.id
-  const id = "8sTrAJpHTw68No6QC9d4";
-  const documentRef = collectionRef.doc(id);
 
-  documentRef
-    .get()
-    .then((doc) => {
-      if (!doc.exists) {
-        res.status(404).send("Application not found");
-      } else {
-        res.json(doc.data());
-      }
-    })
-    .catch((error) => {
-      console.error(error);
-      res.status(500).send("Error retrieving application");
+app.get('/api/public', function (req, res) {
+    res.json({
+        message: 'Hello from a public endpoint! You don\'t need to be authenticated to see this.'
     });
 });
 
-app.post("/submit-application", cors(corsOptions), (req, res) => {
-  const newApplication = req.body;
+app.post('/api/nonprofit-submit-application', checkJwt, function (req, res) {
+    // Log the request
+    logger.info('Request body: ', req.body);
 
-  const timeStamp = admin.firestore.Timestamp.now();
+    // Return 404 for testing
+    // res.status(404).send("Application not found");
+    
+    const newApplication = req.body;
+    const timeStamp = admin.firestore.Timestamp.now();
 
-  newApplication.timeStamp = timeStamp;
+    // Get user id from request
+    const user_slack_id = req.auth.payload.sub;    
 
-  collectionRef
-    .add(newApplication)
-    .then((docRef) => {
-      res.json({ id: docRef.id });
-    })
-    .catch((error) => {
-      console.error(error);
-      res.status(500).send("Error submitting application");
+    newApplication.timeStamp = timeStamp;
+    newApplication.user_id = user_slack_id;
+
+    collectionRef
+        .where("user_id", "==", user_slack_id)
+        .get()
+        .then((querySnapshot) => {
+            if (querySnapshot.empty) {
+                // Create a new application
+                collectionRef
+                    .add(newApplication)
+                    .then((docRef) => {
+                        logger.info("New application created successfully, id: ", docRef.id);
+                        return res.json({ message: docRef.id });                        
+                    })
+                    .catch((error) => {
+                        logger.error("Error submitting application: ", error);
+                        return res.status(500).send("Error submitting application");
+                    });
+
+            } else {
+                querySnapshot.forEach((doc) => {
+                    // Update existing application
+                    collectionRef
+                        .doc(doc.id)
+                        .update(newApplication)
+                        .then(() => {
+                            logger.info("Application updated successfully, id: ", doc.id);
+                            return res.json({ message: doc.id });                            
+                        })
+                        .catch((error) => {
+                            logger.error("Error updating application: ", error);
+                            return res.status(500).send("Error updating application");
+                        });                    
+                });
+            }
+        }
+        )
+        .catch((error) => {
+            console.error(error);
+            return res.status(500).send("Error retrieving application");
+        }
+        );
+
+});
+
+app.get('/api/nonprofit-application', checkJwt, function (req, res) {
+    // Log the request
+    logger.info('Request body: ', req.body);
+
+    // Return 404 for testing
+    // res.status(404).send("Application not found");        
+
+    // Get user id from request
+    const user_slack_id = req.auth.payload.sub;
+
+    console.log("User Slack ID", user_slack_id);
+
+    // Get application from database using user_slack_id
+    collectionRef
+        .where("user_id", "==", user_slack_id)
+        .get()
+        .then((querySnapshot) => {
+            if (querySnapshot.empty) {
+                logger.info("Application not found for user, not returning anything");
+                return res.status(404).send("Application not found");
+            } else {
+                // Return the first application found 
+                logger.info("Application found for user, returning application");               
+                querySnapshot.forEach((doc) => {
+                    return res.json(doc.data());                    
+                    
+                });
+            }
+        }
+        )
+        .catch((error) => {
+            logger.error(error);
+            return res.status(500).send("Error retrieving application");
+        }   
+        );
+    
+});
+
+
+app.get('/api/private-scoped', checkJwt, requiredScopes('read:messages'), function (req, res) {
+    res.json({
+        message: 'Hello from a private endpoint! You need to be authenticated and have a scope of read:messages to see this.'
     });
 });
 
-app.put("/update-application/:id", (req, res) => {
-  // Replace documentId variable with req.params.id
-  const documentId = "8sTrAJpHTw68No6QC9d4";
-  // replace updatedData variable with req.body
-  const updatedData = {
-    charityName: "api_test",
-    location: "api_test",
-    understandProjectUncertainty: true,
-    areasOfFocus: ["Education", "Arts & Culture"],
-    servedPopulations: ["Women", "LatinX"],
-    contanctName: "api_test",
-    contactPhone: "api_test",
-    organizationPurposeAndHistory: "api_test",
-    technicalProblem: "api_test",
-    solutionBenefits: "api_test",
-    familiarWithSlack: true,
-    keyStaffAvailability: [
-      "They will be available remotely throughout the entire period by phone",
-      "They will be available remotely throughout the entire period by phone",
-    ],
-  };
-
-  const documentRef = collectionRef.doc(documentId);
-
-  documentRef
-    .update(updatedData)
-    .then(() => {
-      res.status(200).send("Application updated successfully");
-    })
-    .catch((error) => {
-      console.error(error);
-      res.status(500).send("Error updating application");
-    });
+app.use(function (err, req, res, next) {
+    console.error(err.stack);
+    return res.set(err.headers).status(err.status).json({ message: err.message });
 });
 
-// Start the Express server
-app.listen(3001, () => {
-  console.log("Server listening on port 3001");
-});
+app.listen(3010);
+console.log('Listening on http://localhost:3010');
