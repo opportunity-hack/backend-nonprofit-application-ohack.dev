@@ -151,5 +151,6 @@ app.use(function (err, req, res, next) {
     return res.set(err.headers).status(err.status).json({ message: err.message });
 });
 
-app.listen(3010);
-console.log('Listening on http://localhost:3010');
+port = process.env.PORT || 3010
+app.listen(port);
+console.log('Listening on http://localhost:' + port + '/api/');

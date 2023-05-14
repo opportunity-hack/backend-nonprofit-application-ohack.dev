@@ -1,3 +1,2 @@
-Before pushing to Github, make sure the the firebase-service-account.json file is correctly added to the .gitignore file.
-
-Clean up folder structore to add a file for middleware and routes.
+Ref 1: https://github.com/auth0-samples/auth0-express-api-samples/tree/master/01-Authorization-RS256
+Ref 2: https://auth0.com/docs/quickstart/backend/nodejs/01-authorization
