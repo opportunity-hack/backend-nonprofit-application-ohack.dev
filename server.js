@@ -14,13 +14,15 @@ logger.level = 'info';
 require('dotenv').config();
 
 
-if (!process.env.ISSUER_BASE_URL || !process.env.AUDIENCE || !process.env.FIREBASE_CERT_CONFIG) {
+if (!process.env.ISSUER_BASE_URL || !process.env.AUDIENCE || !process.env.FIREBASE_CERT_CONFIG || !process.env.FRONTEND_URL) {
     throw 'Make sure you have ISSUER_BASE_URL, FIREBASE_CERT_CONFIG, and AUDIENCE in your .env file';
 }
 
 const corsOptions = {
-    origin: 'http://localhost:3000'
+    origin: process.env.FRONTEND_URL
 };
+
+logger.info("CORS origin: ",corsOptions.origin);
 
 app.use(cors(corsOptions));
 app.use(express.json());
@@ -153,4 +155,4 @@ app.use(function (err, req, res, next) {
 
 port = process.env.PORT || 3010
 app.listen(port);
-console.log('Listening on http://localhost:' + port + '/api/');
+console.log('Listening on port' + port + '/api/');
