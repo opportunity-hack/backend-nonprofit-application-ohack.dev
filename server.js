@@ -3,6 +3,7 @@ const app = express();
 const { auth, requiredScopes } = require('express-oauth2-jwt-bearer');
 const cors = require('cors');
 const admin = require("firebase-admin");
+const rateLimit = require("express-rate-limit");
 
 // Setup logger to log info and warning messages
 const log4js = require('log4js');
@@ -27,6 +28,23 @@ logger.info("CORS origin: ",corsOptions.origin);
 app.use(cors(corsOptions));
 app.use(express.json());
 
+const limiter = rateLimit(
+    { windowMs: 15 * 1000,
+        max: 2,
+        message: "Too many requests, please try again later.",
+        keyGenerator: function (req) { return req.ip },
+        handler: function (req, res) {
+            logger.warn("Too many requests from IP: ", req.ip);
+            return res.status(429).send("Too many requests, please try again later.");
+        },
+        // skip for GET /api/nonprofit-application endpoint
+        skip: function (req, res) {
+            return req.path == "/api/nonprofit-application";
+        }  
+    });
+// Add limiter
+app.use(limiter);
+
 const checkJwt = auth();
 
 admin.initializeApp({
@@ -37,6 +55,8 @@ admin.initializeApp({
 const db = admin.firestore();
 const collectionRef = db.collection("project_applications");
 
+// import sendSlackMessage
+const { sendSlackMessage } = require('./utils/slack');
 
 app.get('/api/public', function (req, res) {
     res.json({
@@ -56,9 +76,20 @@ app.post('/api/nonprofit-submit-application', checkJwt, function (req, res) {
 
     // Get user id from request
     const user_slack_id = req.auth.payload.sub;    
-
+    // Get the userid from user_slack_id oauth2|slack|T1Q7936BH-UC11XTRT11
+    const user_id = user_slack_id.split("|")[2].split("-")[1];
+    // log the user_id
+    logger.info("User ID of submitter: ", user_id);
+    
     newApplication.timeStamp = timeStamp;
     newApplication.user_id = user_slack_id;
+
+    // convert newApplication to string
+    newApplicationString = JSON.stringify(newApplication);
+    // format newApplicationString
+    newApplicationString = newApplicationString.replace(/,/g, ",\n");
+    // format json newApplicationString
+    newApplicationString = "```" + newApplicationString + "```";
 
     collectionRef
         .where("user_id", "==", user_slack_id)
@@ -70,6 +101,9 @@ app.post('/api/nonprofit-submit-application', checkJwt, function (req, res) {
                     .add(newApplication)
                     .then((docRef) => {
                         logger.info("New application created successfully, id: ", docRef.id);
+                        sendSlackMessage(`Hey <@${user_id}>, we have received your application.  If you need to change anything, head over to https://ohack.dev/nonprofits/apply`, user_id);
+                        sendSlackMessage(`New application submitted by <@${user_id}> ${newApplicationString}`, "C058JEXPEAJ");
+
                         return res.json({ message: docRef.id });                        
                     })
                     .catch((error) => {
@@ -85,6 +119,9 @@ app.post('/api/nonprofit-submit-application', checkJwt, function (req, res) {
                         .update(newApplication)
                         .then(() => {
                             logger.info("Application updated successfully, id: ", doc.id);
+                            
+                            sendSlackMessage(`Hey <@${user_id}>, we have received your _updated_ application.  If you need to change anything, head over to https://ohack.dev/nonprofits/apply`, user_id);
+                            sendSlackMessage(`Updated application submitted by <@${user_id}> ${newApplicationString}`, "C058JEXPEAJ");
                             return res.json({ message: doc.id });                            
                         })
                         .catch((error) => {
@@ -138,7 +175,6 @@ app.get('/api/nonprofit-application', checkJwt, function (req, res) {
             return res.status(500).send("Error retrieving application");
         }   
         );
-    
 });
 
 
