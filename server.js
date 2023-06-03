@@ -79,7 +79,7 @@ app.post('/api/slack-signup', function (req, res) {
 
 app.post('/api/nonprofit-submit-application', function (req, res) {
     // Log the request
-    logger.info('Request body: ', req.body);
+    logger.info('/api/nonprofit-submit-application Request body: ', req.body);
     
     const newApplication = req.body;
     const timeStamp = admin.firestore.Timestamp.now();
@@ -103,6 +103,14 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
             return res.status(500).send("Error validating Google CAPTCHA token");
         });
 
+    // Get IP from Header    
+    const ip = req.headers['x-ip-address'];
+    logger.info("IP address: ", ip);
+    const forwarded_for_ip = req.headers['x-forwarded-for'];
+    logger.info("Forwarded for IP address: ", forwarded_for_ip);
+    const user_agent = req.headers['user-agent'];
+    logger.info("User agent: ", user_agent);
+
 
     var user_id = "";
     var user_slack_id = "";
@@ -116,14 +124,24 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
         logger.info("User ID of submitter: ", user_id);
     } else {
         logger.warn("User is not authenticated. Storing the application without user_id and user_slack_id, setting to IP address");      
-        // Get the IP address of the submitter
-        user_id = req.ip;
-        user_slack_id = req.ip;        
+        
+        if( ip != undefined && ip != "" ){
+            user_id = ip;
+            user_slack_id = ip;
+        } else if( forwarded_for_ip != undefined && forwarded_for_ip != "" ){
+            user_id = forwarded_for_ip;
+            user_slack_id = forwarded_for_ip;
+        } else {
+            logger.warn("Could not obtain IP address.");
+            return res.status(404).send("Unable to triagulate user ");
+        }        
     }
     
     newApplication.token = ""; // No need to store the CAPTCHA token    
     newApplication.timeStamp = timeStamp;
     newApplication.user_id = user_slack_id;
+    newApplication.x_forwarded_for = req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'] : "";
+    newApplication.x_ip_address = req.headers['x-ip-address'] ? req.headers['x-ip-address'] : "";
 
     // convert newApplication to string
     newApplicationString = JSON.stringify(newApplication);
@@ -183,19 +201,41 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
 
 app.get('/api/nonprofit-application', function (req, res) {
     // Log the request
-    logger.info('Request body: ', req.body);
-    console.log("Request body: ", req.body);
+    logger.info('/api/nonprofit-application Request body: ', req.body);    
     // Get user id from request
     var user_slack_id = "";
+    
+    // Get IP from Header    
+    const ip = req.headers['x-ip-address'];
+    logger.info("IP address: ", ip);
+    const forwarded_for_ip = req.headers['x-forwarded-for'];
+    logger.info("Forwarded for IP address: ", forwarded_for_ip);
+    const user_agent = req.headers['user-agent'];
+    logger.info("User agent: ", user_agent);
     
     if( req.auth && req.auth.payload && req.auth.payload.sub ){
         user_slack_id = req.auth.payload.sub;
     } else {
         // Get the IP address of the submitter
-        user_slack_id = req.ip;
+        user_slack_id = ip;
     }
     // log the user_id
-    console.log("User Slack ID", user_slack_id);
+    logger.info("User Slack ID:", user_slack_id);
+
+    
+    var user_id_query_param = "";
+    if( user_slack_id != undefined && user_slack_id != "" ){
+        user_id_query_param = user_slack_id;
+    } else if( ip != undefined ** ip != "" ){
+        user_id_query_param = ip;
+    } else if( forwarded_for_ip != undefined && forwarded_for_ip != "" ){
+        user_id_query_param = forwarded_for_ip;
+    } else {
+        logger.warn("User is not authenticated. Storing the application without user_id and user_slack_id, setting to IP address");
+        return res.status(404).send("Unable to triagulate user ");
+    }
+
+    logger.info("user_id_query_param: ", user_id_query_param);
 
     // Get application from database using user_slack_id
     collectionRef
@@ -207,10 +247,12 @@ app.get('/api/nonprofit-application', function (req, res) {
                 return res.status(404).send("Application not found");
             } else {
                 // Return the first application found 
-                logger.info("Application found for user, returning application");               
+                logger.info("Application found for user, returning application");                               
+                // If there are multiple applications, only return the first one                
                 querySnapshot.forEach((doc) => {
-                    return res.json(doc.data());                    
-                    
+                    logger.info(doc);
+                    // Only return the first one                    
+                    return res.json(doc.data());                                        
                 });
             }
         }
