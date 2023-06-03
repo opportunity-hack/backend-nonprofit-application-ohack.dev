@@ -4,11 +4,15 @@ const { auth, requiredScopes } = require('express-oauth2-jwt-bearer');
 const cors = require('cors');
 const admin = require("firebase-admin");
 const rateLimit = require("express-rate-limit");
+// import axios
+const axios = require('axios');
 
 // Setup logger to log info and warning messages
 const log4js = require('log4js');
 const logger = log4js.getLogger();
 logger.level = 'info';
+
+
 
 
 
@@ -56,7 +60,7 @@ const db = admin.firestore();
 const collectionRef = db.collection("project_applications");
 
 // import sendSlackMessage
-const { sendSlackMessage } = require('./utils/slack');
+const { sendSlackMessage, signupSlackUser } = require('./utils/slack');
 
 app.get('/api/public', function (req, res) {
     res.json({
@@ -64,23 +68,60 @@ app.get('/api/public', function (req, res) {
     });
 });
 
-app.post('/api/nonprofit-submit-application', checkJwt, function (req, res) {
+app.post('/api/slack-signup', function (req, res) {
     // Log the request
     logger.info('Request body: ', req.body);
+    // Get email from request
+    const email = req.body.email;
+    
+    return signupSlackUser(email);    
+});
 
-    // Return 404 for testing
-    // res.status(404).send("Application not found");
+app.post('/api/nonprofit-submit-application', function (req, res) {
+    // Log the request
+    logger.info('Request body: ', req.body);
     
     const newApplication = req.body;
     const timeStamp = admin.firestore.Timestamp.now();
+    const token = newApplication.token;
 
-    // Get user id from request
-    const user_slack_id = req.auth.payload.sub;    
-    // Get the userid from user_slack_id oauth2|slack|T1Q7936BH-UC11XTRT11
-    const user_id = user_slack_id.split("|")[2].split("-")[1];
-    // log the user_id
-    logger.info("User ID of submitter: ", user_id);
+    // Check if Google CAPTCHA token is valid
+    axios.post(`https://www.google.com/recaptcha/api/siteverify?secret=${process.env.GOOGLE_CAPTCHA_SECRET}&response=${token}`)
+        .then((response) => {
+            // log the response
+            logger.info("Google CAPTCHA response: ", response.data);
+            // Check if Google CAPTCHA token is valid
+            if (response.data.success) {
+                logger.info("Google CAPTCHA token is valid");
+            } else {
+                logger.warn("Google CAPTCHA token is invalid");
+                return res.status(400).send("Google CAPTCHA token is invalid");
+            }
+        })
+        .catch((error) => {
+            logger.error("Error validating Google CAPTCHA token: ", error);
+            return res.status(500).send("Error validating Google CAPTCHA token");
+        });
+
+
+    var user_id = "";
+    var user_slack_id = "";
+    if (req.auth && req.auth.payload && req.auth.payload.sub) {
+        logger.info("User is authenticated");
+        // Get user id from request
+        user_slack_id = req.auth.payload.sub;
+        // Get the userid from user_slack_id oauth2|slack|T1Q7936BH-UC11XTRT11
+        user_id = user_slack_id.split("|")[2].split("-")[1];
+        // log the user_id
+        logger.info("User ID of submitter: ", user_id);
+    } else {
+        logger.warn("User is not authenticated. Storing the application without user_id and user_slack_id, setting to IP address");      
+        // Get the IP address of the submitter
+        user_id = req.ip;
+        user_slack_id = req.ip;        
+    }
     
+    newApplication.token = ""; // No need to store the CAPTCHA token    
     newApplication.timeStamp = timeStamp;
     newApplication.user_id = user_slack_id;
 
@@ -100,10 +141,10 @@ app.post('/api/nonprofit-submit-application', checkJwt, function (req, res) {
                 collectionRef
                     .add(newApplication)
                     .then((docRef) => {
-                        logger.info("New application created successfully, id: ", docRef.id);
+                        logger.info("New application created successfully, id: ", docRef.id);                        
                         sendSlackMessage(`Hey <@${user_id}>, we have received your application.  If you need to change anything, head over to https://ohack.dev/nonprofits/apply`, user_id);
                         sendSlackMessage(`New application submitted by <@${user_id}> ${newApplicationString}`, "C058JEXPEAJ");
-
+                                            
                         return res.json({ message: docRef.id });                        
                     })
                     .catch((error) => {
@@ -140,16 +181,20 @@ app.post('/api/nonprofit-submit-application', checkJwt, function (req, res) {
 
 });
 
-app.get('/api/nonprofit-application', checkJwt, function (req, res) {
+app.get('/api/nonprofit-application', function (req, res) {
     // Log the request
     logger.info('Request body: ', req.body);
-
-    // Return 404 for testing
-    // res.status(404).send("Application not found");        
-
+    console.log("Request body: ", req.body);
     // Get user id from request
-    const user_slack_id = req.auth.payload.sub;
-
+    var user_slack_id = "";
+    
+    if( req.auth && req.auth.payload && req.auth.payload.sub ){
+        user_slack_id = req.auth.payload.sub;
+    } else {
+        // Get the IP address of the submitter
+        user_slack_id = req.ip;
+    }
+    // log the user_id
     console.log("User Slack ID", user_slack_id);
 
     // Get application from database using user_slack_id

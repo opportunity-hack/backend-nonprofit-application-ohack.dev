@@ -12,6 +12,23 @@ require('dotenv').config();
 // Create a new instance of the WebClient class with the token read from your environment variable
 const web = new WebClient(process.env.SLACK_BOT_TOKEN);
 
+// Need to have a business+ account (that we don't have)
+function signupSlackUser(email_address){
+    web.admin.users.invite({
+        email: email_address,
+        team_id: 'T1Q7936BH',
+        token: process.env.SLACK_BOT_TOKEN
+    })
+        .then((res) => {
+            // `res` contains information about the posted message
+            console.log('Message sent: ', res.ts);
+        }
+        )
+        .catch((error) => {
+            logger.error(error);
+        }
+        );        
+}
 
 
 // Helper function to Send Slack messages
@@ -45,6 +62,7 @@ function sendSlackMessageWithAttachments(message, attachments, channel) {
 // Export the sendSlackMessage function
 module.exports = {
     sendSlackMessage,
-    sendSlackMessageWithAttachments
+    sendSlackMessageWithAttachments,
+    signupSlackUser
 };
 
