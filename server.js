@@ -32,6 +32,7 @@ logger.info("CORS origin: ",corsOptions.origin);
 app.use(cors(corsOptions));
 app.use(express.json());
 
+
 const limiter = rateLimit(
     { windowMs: 15 * 1000,
         max: 2,
@@ -43,7 +44,7 @@ const limiter = rateLimit(
         },
         // skip for GET /api/nonprofit-application endpoint
         skip: function (req, res) {
-            return req.path == "/api/nonprofit-application";
+            return req.path == "/api/nonprofit-application" || req.path == "/api/public/nonprofit-application";
         }  
     });
 // Add limiter
@@ -199,12 +200,44 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
 
 });
 
-app.get('/api/nonprofit-application', function (req, res) {
+
+
+
+function getApplication(res, user_id_query_param){
+    logger.info("user_id_query_param: ", user_id_query_param);
+
+    // Get application from database using user_slack_id
+    collectionRef
+        .where("user_id", "==", user_id_query_param)
+        .get()
+        .then((querySnapshot) => {
+            if (querySnapshot.empty) {
+                logger.info("Application not found for user, not returning anything");
+                return res.status(404).send("Application not found");
+            } else {
+                // Return the first application found 
+                logger.info("Application found for user, returning application");
+                // If there are multiple applications, only return the first one                
+                querySnapshot.forEach((doc) => {
+                    // Only return the first one                    
+                    return res.json(doc.data());
+                });
+            }
+        }
+        )
+        .catch((error) => {
+            logger.error(error);
+            return res.status(500).send("Error retrieving application");
+        }
+        );
+}
+
+
+
+app.get('/api/public/nonprofit-application', function (req, res) {
     // Log the request
-    logger.info('/api/nonprofit-application Request body: ', req.body);    
-    // Get user id from request
-    var user_slack_id = "";
-    
+    logger.info('/api/public/nonprofit-application Request body: ', req.body);
+        
     // Get IP from Header    
     const ip = req.headers['x-ip-address'];
     logger.info("IP address: ", ip);
@@ -213,55 +246,42 @@ app.get('/api/nonprofit-application', function (req, res) {
     const user_agent = req.headers['user-agent'];
     logger.info("User agent: ", user_agent);
     
+    var user_id_query_param = "";
+    if (ip != undefined ** ip != "") {
+        user_id_query_param = ip;
+    } else if (forwarded_for_ip != undefined && forwarded_for_ip != "") {
+        user_id_query_param = forwarded_for_ip;
+    } else {
+        logger.warn("Unable to triagulate user");
+        return res.status(404).send("Unable to triagulate user");
+    }
+    return getApplication(res, user_id_query_param);
+});
+
+app.get('/api/nonprofit-application', checkJwt, function (req, res) {
+    // Log the request
+    logger.info('/api/nonprofit-application Request body: ', req.body);    
+    // Get user id from request
+    var user_slack_id = "";
+    
+    
     if( req.auth && req.auth.payload && req.auth.payload.sub ){
         user_slack_id = req.auth.payload.sub;
-    } else {
-        // Get the IP address of the submitter
-        user_slack_id = ip;
     }
+
     // log the user_id
     logger.info("User Slack ID:", user_slack_id);
 
     
     var user_id_query_param = "";
     if( user_slack_id != undefined && user_slack_id != "" ){
-        user_id_query_param = user_slack_id;
-    } else if( ip != undefined ** ip != "" ){
-        user_id_query_param = ip;
-    } else if( forwarded_for_ip != undefined && forwarded_for_ip != "" ){
-        user_id_query_param = forwarded_for_ip;
+        user_id_query_param = user_slack_id;        
     } else {
-        logger.warn("User is not authenticated. Storing the application without user_id and user_slack_id, setting to IP address");
-        return res.status(404).send("Unable to triagulate user ");
+        logger.warn("Unable to triagulate use by Slack ID");
+        return res.status(404).send("Unable to triagulate user");
     }
 
-    logger.info("user_id_query_param: ", user_id_query_param);
-
-    // Get application from database using user_slack_id
-    collectionRef
-        .where("user_id", "==", user_slack_id)
-        .get()
-        .then((querySnapshot) => {
-            if (querySnapshot.empty) {
-                logger.info("Application not found for user, not returning anything");
-                return res.status(404).send("Application not found");
-            } else {
-                // Return the first application found 
-                logger.info("Application found for user, returning application");                               
-                // If there are multiple applications, only return the first one                
-                querySnapshot.forEach((doc) => {
-                    logger.info(doc);
-                    // Only return the first one                    
-                    return res.json(doc.data());                                        
-                });
-            }
-        }
-        )
-        .catch((error) => {
-            logger.error(error);
-            return res.status(500).send("Error retrieving application");
-        }   
-        );
+    return getApplication(res, user_id_query_param);
 });
 
 
