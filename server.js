@@ -36,11 +36,11 @@ app.use(express.json());
 const limiter = rateLimit(
     { windowMs: 15 * 1000,
         max: 2,
-        message: "Too many requests, please try again later.",
+        message: "100 Too many requests, please try again later. If this happens again, please send us an email at help@ohack.org.",
         keyGenerator: function (req) { return req.ip },
         handler: function (req, res) {
             logger.warn("Too many requests from IP: ", req.ip);
-            return res.status(429).send("Too many requests, please try again later.");
+            return res.status(429).send("100 Too many requests, please try again later. If this happens again, please send us an email at help@ohack.org");
         },
         // skip for GET /api/nonprofit-application endpoint
         skip: function (req, res) {
@@ -96,12 +96,12 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
                 logger.info("Google CAPTCHA token is valid");
             } else {
                 logger.warn("Google CAPTCHA token is invalid");
-                return res.status(400).send("Google CAPTCHA token is invalid");
+                return res.status(400).send("231 Google CAPTCHA token is invalid  - please send us an email at help@ohack.org");
             }
         })
         .catch((error) => {
             logger.error("Error validating Google CAPTCHA token: ", error);
-            return res.status(500).send("Error validating Google CAPTCHA token");
+            return res.status(500).send("812 Error validating Google CAPTCHA token  - please send us an email at help@ohack.org");
         });
 
     // Get IP from Header    
@@ -126,15 +126,15 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
     } else {
         logger.warn("User is not authenticated. Storing the application without user_id and user_slack_id, setting to IP address");      
         
-        if( ip != undefined && ip != "" ){
+        if( ip != undefined && ip != "" && ip != null ){
             user_id = ip;
             user_slack_id = ip;
-        } else if( forwarded_for_ip != undefined && forwarded_for_ip != "" ){
+        } else if (forwarded_for_ip != undefined && forwarded_for_ip != "" && forwarded_for_ip != null ){
             user_id = forwarded_for_ip;
             user_slack_id = forwarded_for_ip;
         } else {
             logger.warn("Could not obtain IP address.");
-            return res.status(404).send("Unable to triagulate user ");
+            return res.status(404).send("Unable to triagulate user - please send us an email at help@ohack.org");
         }        
     }
     
@@ -168,7 +168,7 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
                     })
                     .catch((error) => {
                         logger.error("Error submitting application: ", error);
-                        return res.status(500).send("Error submitting application");
+                        return res.status(500).send("917 Error submitting application - please send us an email at help@ohack.org");
                     });
 
             } else {
@@ -186,7 +186,7 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
                         })
                         .catch((error) => {
                             logger.error("Error updating application: ", error);
-                            return res.status(500).send("Error updating application");
+                            return res.status(500).send("381 Error updating application - please send us an email at help@ohack.org");
                         });                    
                 });
             }
@@ -194,7 +194,7 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
         )
         .catch((error) => {
             console.error(error);
-            return res.status(500).send("Error retrieving application");
+            return res.status(500).send("861 Error retrieving application - please send us an email at help@ohack.org");
         }
         );
 
@@ -227,7 +227,7 @@ function getApplication(res, user_id_query_param){
         )
         .catch((error) => {
             logger.error(error);
-            return res.status(500).send("Error retrieving application");
+            return res.status(500).send("291 Error retrieving application  - please send us an email at help@ohack.org");
         }
         );
 }
@@ -253,7 +253,7 @@ app.get('/api/public/nonprofit-application', function (req, res) {
         user_id_query_param = forwarded_for_ip;
     } else {
         logger.warn("Unable to triagulate user");
-        return res.status(404).send("Unable to triagulate user");
+        return res.status(404).send("784 Unable to triagulate user - please send us an email at help@ohack.org");
     }
     return getApplication(res, user_id_query_param);
 });
@@ -278,7 +278,7 @@ app.get('/api/nonprofit-application', checkJwt, function (req, res) {
         user_id_query_param = user_slack_id;        
     } else {
         logger.warn("Unable to triagulate use by Slack ID");
-        return res.status(404).send("Unable to triagulate user");
+        return res.status(404).send("219 Unable to triagulate user  - please send us an email at help@ohack.org");
     }
 
     return getApplication(res, user_id_query_param);
