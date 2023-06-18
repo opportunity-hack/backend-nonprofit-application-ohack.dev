@@ -12,8 +12,11 @@ const log4js = require('log4js');
 const logger = log4js.getLogger();
 logger.level = 'info';
 
+// import sendSlackMessage
+const { sendSlackMessage, signupSlackUser } = require('./utils/slack');
 
 
+const NonProfitApplicationSubmitConfirmation = require('./src/components/NonProfitApplicationSubmitEmail/NonProfitApplicationSubmitConfirmation.js');              
 
 
 require('dotenv').config();
@@ -60,8 +63,6 @@ admin.initializeApp({
 const db = admin.firestore();
 const collectionRef = db.collection("project_applications");
 
-// import sendSlackMessage
-const { sendSlackMessage, signupSlackUser } = require('./utils/slack');
 
 app.get('/api/public', function (req, res) {
     res.json({
@@ -112,7 +113,6 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
     const user_agent = req.headers['user-agent'];
     logger.info("User agent: ", user_agent);
 
-
     var user_id = "";
     var user_slack_id = "";
     if (req.auth && req.auth.payload && req.auth.payload.sub) {
@@ -143,6 +143,34 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
     newApplication.user_id = user_slack_id;
     newApplication.x_forwarded_for = req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'] : "";
     newApplication.x_ip_address = req.headers['x-ip-address'] ? req.headers['x-ip-address'] : "";
+
+    if (newApplication.contactPhone) {
+        logger.info("Contact phone was provided");
+        // See if this is an email address
+        if (newApplication.contactPhone.includes("@")) {
+            logger.info("Contact phone is an email address");
+
+            var nameToUse = "";
+            // See if there is a name
+            if (newApplication.contactName) {
+                logger.info("Contact name is present");
+                nameToUse = newApplication.contactName;
+            }
+
+            // Extract out multiple email addresses with regex
+            var emailAddresses = newApplication.contactPhone.match(/\S+@\S+\.\S+/g);
+            logger.info("Email addresses: ", emailAddresses);
+            // Loop through email addresses
+            emailAddresses.forEach((emailAddress) => {
+                logger.info("Email address: ", emailAddress);
+                // Send Welcome Email
+                const nonProfitApplicationSubmitConfirmation = new NonProfitApplicationSubmitConfirmation(nameToUse, emailAddress);
+                nonProfitApplicationSubmitConfirmation.sendEmail();
+            });
+        } else {
+            logger.info("Contact phone is not an email address");
+        }
+    }
 
     // convert newApplication to string
     newApplicationString = JSON.stringify(newApplication);
@@ -205,6 +233,7 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
 
 function getApplication(res, user_id_query_param){
     logger.info("user_id_query_param: ", user_id_query_param);
+
 
     // Get application from database using user_slack_id
     collectionRef
