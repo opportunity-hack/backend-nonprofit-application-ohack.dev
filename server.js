@@ -13,7 +13,7 @@ const logger = log4js.getLogger();
 logger.level = 'info';
 
 // import sendSlackMessage
-const { sendSlackMessage, signupSlackUser } = require('./utils/slack');
+const { sendSlackMessage, signupSlackUser, unsubscribeNewsletterUser } = require('./utils/slack');
 
 
 const NonProfitApplicationSubmitConfirmation = require('./src/components/NonProfitApplicationSubmitEmail/NonProfitApplicationSubmitConfirmation.js');              
@@ -77,6 +77,41 @@ app.post('/api/slack-signup', function (req, res) {
     const email = req.body.email;
     
     return signupSlackUser(email);    
+});
+
+app.post('/api/unsubscribe', function (req, res) {
+    // Log the request
+    logger.info('Request body: ', req.body);
+    // Get email from request
+    const email = req.body.email;
+    
+    // Handle email empty or not set
+    if (email == undefined || email == "" || email == null) {
+        logger.warn("Email is empty or not set");
+        return res.status(400).send("Email is empty or not set");
+    }
+
+    // Handle email not valid
+    if (!email.includes("@")) {
+        logger.warn("Email is not valid");
+        return res.status(400).send("Email is not valid");
+    }
+
+
+    const slackCallback = (result) => {
+        logger.info("Slack callback");
+        if (result === "success" )
+        {
+            logger.info("Successfully unsubscribed");
+            return res.status(200).send("Successfully unsubscribed");
+        }
+        else {
+            logger.error("Error unsubscribing");
+            return res.status(500).send("Error unsubscribing - please send us an email at help@ohack.org");
+        }
+    }
+    
+    unsubscribeNewsletterUser(email, slackCallback);
 });
 
 app.post('/api/nonprofit-submit-application', function (req, res) {

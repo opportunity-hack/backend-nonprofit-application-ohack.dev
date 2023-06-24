@@ -30,6 +30,25 @@ function signupSlackUser(email_address){
         );        
 }
 
+function unsubscribeNewsletterUser(email_address, callback){
+    web.chat.postMessage({
+        channel: 'C05DZ0YNTB7',
+        text: 'unsubscribe: ' + email_address
+    })
+        .then((res) => {
+            // `res` contains information about the posted message
+            logger.info('Unsubscribe Message sucessfully sent: ', res.ts);            
+            callback("success");
+        }
+        )
+        .catch((error) => {
+            logger.error("Error", error);
+            callback(null);
+        }
+        );
+}
+
+
 
 // Helper function to Send Slack messages
 function sendSlackMessage(message, channel) {
@@ -63,6 +82,7 @@ function sendSlackMessageWithAttachments(message, attachments, channel) {
 module.exports = {
     sendSlackMessage,
     sendSlackMessageWithAttachments,
-    signupSlackUser
+    signupSlackUser,
+    unsubscribeNewsletterUser
 };
 
