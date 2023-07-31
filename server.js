@@ -15,6 +15,15 @@ logger.level = 'info';
 // import sendSlackMessage
 const { sendSlackMessage, signupSlackUser, unsubscribeNewsletterUser } = require('./utils/slack');
 
+// Add cache
+const apicache = require('apicache');
+const cache = apicache.middleware;
+// Log cache
+apicache.options({
+    debug: true
+});
+
+
 
 const NonProfitApplicationSubmitConfirmation = require('./src/components/NonProfitApplicationSubmitEmail/NonProfitApplicationSubmitConfirmation.js');              
 
@@ -114,6 +123,63 @@ app.post('/api/unsubscribe', function (req, res) {
     unsubscribeNewsletterUser(email, slackCallback);
 });
 
+
+app.get('/api/nonprofit-applications', cache('5 minutes')  ,function (req, res) {
+
+    // Log the request
+    logger.info('/api/nonprofit-submit-applications Request body: ', req.body);
+    // Get user id from request
+    var user_slack_id = "";
+    if( req.auth && req.auth.payload && req.auth.payload.sub ){
+        user_slack_id = req.auth.payload.sub;
+    }
+    // log the user_id
+    logger.info("User Slack ID:", user_slack_id);
+    
+
+    // Get all collectionRef from database, sorted by timestamp
+    collectionRef
+        .orderBy("timeStamp", "desc")
+        .get()
+        .then((querySnapshot) => {
+            if (querySnapshot.empty) {
+                logger.info("No applications found");
+                return res.status(404).send("No applications found");
+            } else {
+                // Return the first application found
+                logger.info("Applications found, returning applications");
+                var applications = [];
+                querySnapshot.forEach((doc) => {                    
+                    // Don't return certain fields like: contactPhone, contactEmail, contactName, ip, user_id, x_forwarded_for, x_ip_address
+                    response = doc.data();
+                    response.id = doc.id;
+                    response.contactPhone = "";
+                    response.contactEmail = "";
+                    response.contactName = "";
+                    response.ip = "";
+                    response.user_id = "";
+                    response.x_forwarded_for = "";
+                    response.x_ip_address = "";
+                    
+                    applications.push(response);
+                });                
+                return res.json(applications);
+            }
+        }
+        )
+        .catch((error) => {
+            logger.error(error);
+            return res.status(500).send("Error retrieving applications");
+        }
+        );
+});
+
+
+        
+
+                
+
+
 app.post('/api/nonprofit-submit-application', function (req, res) {
     // Log the request
     logger.info('/api/nonprofit-submit-application Request body: ', req.body);
@@ -169,6 +235,8 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
             user_slack_id = forwarded_for_ip;
         } else {
             logger.warn("Could not obtain IP address.");
+            
+            
             return res.status(404).send("Unable to triagulate user - please send us an email at help@ohack.org");
         }        
     }
