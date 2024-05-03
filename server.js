@@ -1,6 +1,6 @@
 const express = require('express');
 const app = express();
-const { auth, requiredScopes } = require('express-oauth2-jwt-bearer');
+
 const cors = require('cors');
 const admin = require("firebase-admin");
 const rateLimit = require("express-rate-limit");
@@ -31,9 +31,21 @@ const NonProfitApplicationSubmitConfirmation = require('./src/components/NonProf
 require('dotenv').config();
 
 
-if (!process.env.ISSUER_BASE_URL || !process.env.AUDIENCE || !process.env.FIREBASE_CERT_CONFIG || !process.env.FRONTEND_URL) {
-    throw 'Make sure you have ISSUER_BASE_URL, FIREBASE_CERT_CONFIG, and AUDIENCE in your .env file';
+
+
+if (!process.env.PROPEL_AUTH_URL || !process.env.FIREBASE_CERT_CONFIG || !process.env.FRONTEND_URL) {
+    throw 'Make sure you have NEXT_PUBLIC_REACT_APP_AUTH_URL andFIREBASE_CERT_CONFIG in your .env file';
 }
+
+const initAuth = require('@propelauth/express').initAuth;
+const {
+    requireUser,
+    fetchUserMetadataByUserId,        
+} = initAuth({
+    authUrl: process.env.PROPEL_AUTH_URL,
+    apiKey: process.env.PROPEL_AUTH_KEY
+});
+
 
 const corsOptions = {
     origin: process.env.FRONTEND_URL
@@ -62,7 +74,6 @@ const limiter = rateLimit(
 // Add limiter
 app.use(limiter);
 
-const checkJwt = auth();
 
 admin.initializeApp({
     credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_CERT_CONFIG)),
@@ -331,6 +342,56 @@ app.post('/api/nonprofit-submit-application', function (req, res) {
 
 });
 
+function getSlackUserFromPropelUser(user_id, callback) {
+    // Get user from Slack using user_id
+    const url = `${process.env.PROPEL_AUTH_URL}/api/backend/v1/user/${user_id}/oauth_token`;
+    const headers = {
+        'Authorization': `Bearer ${process.env.PROPEL_AUTH_KEY}`
+    };
+
+    // Handle null
+    if (user_id == null || user_id == "") {
+        logger.warn("User ID is null or empty");
+        callback(null);
+    }
+
+    logger.info("url: ", url);
+    const resp = axios.get(url, { headers: headers });
+
+    resp.then((response) => {
+
+        // Get Json body
+        const data = response.data;
+        // Get slack.access_token 
+        const slack_access_token = data.slack.access_token;
+        logger.info("slack_access_token: ", slack_access_token);
+        if( slack_access_token )
+        {
+            // Get user from Slack using slack_access_token
+            const slack_url = `https://slack.com/api/openid.connect.userInfo`;
+            const slack_headers = {
+                'Authorization': `Bearer ${slack_access_token}`
+            };
+            const slack_resp = axios.get(slack_url, { headers: slack_headers });
+
+            slack_resp.then((slack_response) => {
+                // Get Json body
+                const slack_data = slack_response.data;                
+                callback(slack_data);
+            }
+            )
+                .catch((error) => {
+                    logger.error("Error getting user from Slack: ", error);
+                    callback(null);
+                }
+                );                
+        }        
+    })
+        .catch((error) => {
+            logger.error("Error getting user from PropelAPI: ", error);
+            callback(null);
+        });
+}
 
 
 
@@ -390,38 +451,27 @@ app.get('/api/public/nonprofit-application', function (req, res) {
     return getApplication(res, user_id_query_param);
 });
 
-app.get('/api/nonprofit-application', checkJwt, function (req, res) {
+app.get('/api/nonprofit-application', requireUser, function (req, res) {
     // Log the request
     logger.info('/api/nonprofit-application Request body: ', req.body);    
     // Get user id from request
     var user_slack_id = "";
-    
-    
-    if( req.auth && req.auth.payload && req.auth.payload.sub ){
-        user_slack_id = req.auth.payload.sub;
+    const slack_user_id_prefix = "oauth2|slack|T1Q7936BH-" 
+
+    logger.info("req.user: ", req.user.userId)
+    getSlackUserFromPropelUser(req.user.userId, (slackUser) => {
+        if (slackUser) {
+            user_slack_id = slack_user_id_prefix+slackUser.sub;
+            logger.info("User Slack ID:", user_slack_id);
+            return getApplication(res, user_slack_id);
+        } else {
+            logger.warn("Unable to triagulate user by Slack ID");
+            return res.status(404).send("219 Unable to triagulate user  - please send us an email at help@ohack.org");
+        }
     }
-
-    // log the user_id
-    logger.info("User Slack ID:", user_slack_id);
-
+    );
+});            
     
-    var user_id_query_param = "";
-    if( user_slack_id != undefined && user_slack_id != "" ){
-        user_id_query_param = user_slack_id;        
-    } else {
-        logger.warn("Unable to triagulate use by Slack ID");
-        return res.status(404).send("219 Unable to triagulate user  - please send us an email at help@ohack.org");
-    }
-
-    return getApplication(res, user_id_query_param);
-});
-
-
-app.get('/api/private-scoped', checkJwt, requiredScopes('read:messages'), function (req, res) {
-    res.json({
-        message: 'Hello from a private endpoint! You need to be authenticated and have a scope of read:messages to see this.'
-    });
-});
 
 app.use(function (err, req, res, next) {
     console.error(err.stack);
